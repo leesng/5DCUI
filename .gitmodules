@@ -1,0 +1,4 @@
+[submodule "extern/5dchess_engine"]
+	path = extern/5dchess_engine
+	url = https://github.com/leesng/5dchess_engine.git
+	branch = 5dcui-adapt-tag

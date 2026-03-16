@@ -1,0 +1,187 @@
+name: Build 5DCUI
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: ${{ matrix.os }} Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            sfml_url: "https://github.com/SFML/SFML/releases/download/3.0.2/SFML-3.0.2-Windows.VS2022.x64.zip"
+            sfml_dir: "SFML-3.0.2"
+          - os: ubuntu-latest
+            sfml_url: "https://github.com/SFML/SFML/releases/download/3.0.2/SFML-3.0.2-Linux.GCC.tar.gz"
+            sfml_dir: "SFML-3.0.2"
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Add Swap Space
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          if swapon --show | grep -q '/swapfile'; then
+              sudo swapoff /swapfile
+              sudo rm -f /swapfile
+          fi
+          sudo dd if=/dev/zero of=/swapfile bs=1G count=8 status=none
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          swapon --show
+          free -h
+
+      - name: Install Linux Dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxi-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libudev-dev \
+            libfreetype-dev \
+            libflac-dev \
+            libogg-dev \
+            libvorbis-dev \
+            libvorbisenc2 \
+            libvorbisfile3 \
+            libopenal-dev \
+            libpthread-stubs0-dev \
+            libgtk-3-dev \
+            pkg-config
+
+      - name: Download & Setup SFML
+        shell: bash
+        run: |
+          mkdir -p extern
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            curl -L "${{ matrix.sfml_url }}" -o sfml.zip --retry 5 --retry-delay 5
+            unzip -q sfml.zip -d extern
+            mv extern/SFML-3.0.2 extern/SFML3
+            rm -f sfml.zip
+          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            if [[ "$(uname -m)" == "arm64" ]]; then
+              SFML_URL="https://github.com/SFML/SFML/releases/download/3.0.2/SFML-3.0.2-macOS.arm64.tar.gz"
+            else
+              SFML_URL="https://github.com/SFML/SFML/releases/download/3.0.2/SFML-3.0.2-macOS.x64.tar.gz"
+            fi
+            curl -L "$SFML_URL" -o sfml.tar.gz --retry 5 --retry-delay 5
+            tar -xzf sfml.tar.gz -C extern
+            mv extern/SFML-3.0.2 extern/SFML3
+            rm -f sfml.tar.gz
+          else
+            curl -L "${{ matrix.sfml_url }}" -o sfml.tar.gz --retry 5 --retry-delay 5
+            tar -xzf sfml.tar.gz -C extern
+            mv extern/SFML-3.0.2 extern/SFML3
+            rm -f sfml.tar.gz
+          fi
+
+      - name: Configure CMake
+        shell: bash
+        run: |
+          mkdir -p build
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+          else
+            cmake -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+          fi
+
+      - name: Build Project
+        shell: bash
+        run: |
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cmake --build build --config Release
+          else
+            cmake --build build
+          fi
+
+      - name: Rename Artifacts
+        shell: bash
+        run: |
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            BIN_DIR="build/bin/Release"
+            if [ ! -f "$BIN_DIR/5DCUI.exe" ]; then
+              echo "Error: 5DCUI.exe not found in $BIN_DIR"
+              ls -la "$BIN_DIR"
+              exit 1
+            fi
+            mv "$BIN_DIR/5DCUI.exe" "$BIN_DIR/5DCUI-windows-x64.exe"
+          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            BIN_DIR="build/bin"
+            if [ ! -f "$BIN_DIR/5DCUI" ]; then
+              echo "Error: 5DCUI not found in $BIN_DIR"
+              ls -la "$BIN_DIR"
+              exit 1
+            fi
+            if [[ "$(uname -m)" == "arm64" ]]; then
+              mv "$BIN_DIR/5DCUI" "$BIN_DIR/5DCUI-macos-arm64"
+            else
+              mv "$BIN_DIR/5DCUI" "$BIN_DIR/5DCUI-macos-x64"
+            fi
+          else
+            BIN_DIR="build/bin"
+            if [ ! -f "$BIN_DIR/5DCUI" ]; then
+              echo "Error: 5DCUI not found in $BIN_DIR"
+              ls -la "$BIN_DIR"
+              exit 1
+            fi
+            mv "$BIN_DIR/5DCUI" "$BIN_DIR/5DCUI-ubuntu-x64"
+          fi
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: 5DCUI-${{ matrix.os }}-Release
+          path: ${{ matrix.os == 'windows-latest' && 'build/bin/Release/' || 'build/bin/' }}
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Delete Existing Release
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          curl -X DELETE \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG_NAME" || echo "No existing release to delete"
+
+      - name: Create & Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
