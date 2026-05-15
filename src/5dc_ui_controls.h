@@ -53,6 +53,7 @@ struct FiveDChessUiControls {
 			auto btnIndex = m_btnList.getIndexAt(mousePos) ;
 
 			if (btnIndex == 0) { // btnMatchStatus
+				m_data.flip = !m_data.flip;
 				std::cout << TS << "m_btnMatchStatus Click : " << std::endl;
 			}
 

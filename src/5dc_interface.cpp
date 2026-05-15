@@ -341,6 +341,20 @@ const decltype(EngineInterface::get_current_level) EngineInterface::get_current_
 	return g->get_current_level();
 };
 
+const decltype(EngineInterface::get_current_boards_edges) EngineInterface::get_current_boards_edges = [](std::any& ei) {
+	auto g = std::any_cast<std::shared_ptr<game>>(ei);
+	std::vector<std::pair<int, int>> edges = g->get_current_boards_edges();
+	std::vector<std::pair<std::tuple<int, int, int, int>, std::tuple<int, int, int, int>>> result;
+	constexpr static int (*u_to_l)(int) = [](int u) {
+		return (u & 1) ? ~(u >> 1) : (u >> 1);
+	};
+	for (auto it : edges) {
+		result.push_back(std::make_pair(std::make_tuple(u_to_l(it.first >> 8), (it.first & 0xFF), 3, 3),
+		                           std::make_tuple(u_to_l(it.second >> 8), (it.second & 0xFF), 3, 3)));
+	}
+	return result;
+};
+
 const decltype(EngineInterface::get_match_status) EngineInterface::get_match_status = [](std::any &ei) { 
 	auto g = std::any_cast<std::shared_ptr<game>>(ei);
 	return (EngineInterface::match_status_t)g->get_match_status();

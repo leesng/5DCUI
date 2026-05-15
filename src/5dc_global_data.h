@@ -24,6 +24,10 @@ struct FiveDChessData {
 
     sf::Vector2f cameraPos = sf::Vector2f((cellSizeX * 2.5f),(cellSizeY * 0.5f));
     float cameraZoom = (1.f);
+	
+	// Global vertical flip control (true = flip L Y X axis, false = original)
+	// true: Black at bottom, White at top | false: White at bottom, Black at top
+	bool flip = true;
 
     // Board highlight - Row (priority) + Column | Tuple: {T, C, Row, Col}
     std::vector<int> mandatoryLines = {0};
@@ -67,6 +71,8 @@ struct FiveDChessData {
 
     // Trace arrow list | Pair: {StartPos(L T Y X), EndPos(L T Y X)}  Add presentColor to draw
     std::vector<std::pair<std::tuple<int, int, int, int>, std::tuple<int, int, int, int>>> traceArrowsList = {
+    };
+    std::vector<std::pair<std::tuple<int, int, int, int>, std::tuple<int, int, int, int>>> edgesArrowsList = {
     };
 	
 	std::vector<std::tuple<int, int, bool, std::string>> phantomBoardList = {
@@ -159,6 +165,7 @@ struct FiveDChessData {
 		movablePositions = EngineInterface::gen_move_if_playable(engine, slectedPosition);
 		checkArrowsList = EngineInterface::get_current_checks(engine);
 		traceArrowsList = {};
+		edgesArrowsList = EngineInterface::get_current_boards_edges(engine);
 		
 		//child_actions = EngineInterface::get_child_actions(engine);
 		//history_actions = EngineInterface::get_historical_actions(engine);

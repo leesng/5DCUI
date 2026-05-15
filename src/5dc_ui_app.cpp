@@ -121,6 +121,7 @@ std::optional<std::tuple<int, int, int, int>> worldToCellTuple(FiveDChessData& m
     
     int x = static_cast<int>(std::floor(localInSmallBoard.x / m_data.smallCellSizeX));
     int y = static_cast<int>(std::floor(localInSmallBoard.y / m_data.smallCellSizeY));
+    
     if (x < 0 || x >= m_data.boardGridX || y < 0 || y >= m_data.boardGridY)
         return std::nullopt;
     
@@ -133,8 +134,13 @@ void onMouseClick(FiveDChessData &m_data, const sf::Vector2f& worldPos, const sf
     auto cellTupleOpt = worldToCellTuple(m_data, worldPos);
     if (cellTupleOpt.has_value()) {
 		// handle_click
-        auto [LL, TC, BY, XX] = cellTupleOpt.value();
-        auto [L, T, Y, X, C] = std::make_tuple(LL, (TC >> 1), (m_data.boardGridY -1 - BY), XX, (bool)(TC & 1));
+        auto [LL, TC, BY, BX] = cellTupleOpt.value();
+        // FLIP: L Y X when not flipped (game expects top-to-bottom 0-7)
+        auto [L, T, C, Y, X] = std::make_tuple(
+		    m_data.flip ? -LL : LL, 
+		    (TC >> 1), (bool)(TC & 1),
+            m_data.flip ? BY : (m_data.boardGridY -1 - BY), 
+			m_data.flip ? (m_data.boardGridX -1 - BX) : BX);
         EngineInterface::vec4_t pos = std::make_tuple(L, T, Y, X);
         auto it1 = std::find(m_data.movablePositions.begin(), m_data.movablePositions.end(), pos);
         
@@ -386,6 +392,7 @@ void FiveDChessRenderer::drawBackgroundGrid(sf::RenderWindow& window, int startX
     sf::RectangleShape rowShape({(endX - startX + 1) * cellW, cellH});
     auto drawRow = [&](int y, const sf::Color& c) {
         if (y < startY || y > endY) return;
+		y = m_data.flip ? -y : y;
         rowShape.setPosition({startX * cellW, y * cellH});
         rowShape.setFillColor(c);
         window.draw(rowShape, states);
@@ -408,7 +415,7 @@ void FiveDChessRenderer::drawBackgroundGrid(sf::RenderWindow& window, int startX
     if (startX <= 0 && 0 <= endX) {
         for (int yIdx = startY; yIdx <= endY; ++yIdx) {
             m_coordText.setFillColor((((0 >> 1) + yIdx) % 2 != 0) ? m_data.COLOR_DARK : m_data.COLOR_LIGHT);
-            m_coordText.setString("L" + std::to_string(yIdx));
+            m_coordText.setString("L" + std::to_string(m_data.flip ? -yIdx : yIdx));
             m_coordText.setPosition({0 * cellW, (yIdx + 0.45f) * cellH});
             window.draw(m_coordText, states);
         }
@@ -466,7 +473,7 @@ void FiveDChessRenderer::drawBoardsAndPieces(sf::RenderWindow& window, int start
             const int c = std::get<2>(tpl);
             const std::string& b = std::get<3>(tpl);
 
-            const int yIdx = l;
+            const int yIdx = m_data.flip ? -l : l;
             const int xIdx = ((t_val) << 1) | (int)(c);
 
 			// A . drawing edges
@@ -536,10 +543,11 @@ void FiveDChessRenderer::drawBoardsAndPieces(sf::RenderWindow& window, int start
                             const sf::Texture& tex = texIt->second;
                             sf::Vector2f texSize(tex.getSize());
                             
-                            int render_y = board_y;
+                            int render_x = m_data.flip ? m_data.boardGridX - 1 - board_x : board_x;
+							int render_y = m_data.flip ? m_data.boardGridY - 1 - board_y : board_y;
                             
                             sf::Vector2f smallCellCenterPos(
-                                smallGridOffsetX + board_x * smallCellSizeX + smallCellSizeX / 2,
+                                smallGridOffsetX + render_x * smallCellSizeX + smallCellSizeX / 2,
                                 smallGridOffsetY + render_y * smallCellSizeY + smallCellSizeY / 2
                             );
                             sf::Vector2f drawSize(pieceSizeX, pieceSizeY);
@@ -577,10 +585,10 @@ void FiveDChessRenderer::drawBoardsAndPieces(sf::RenderWindow& window, int start
 
 	// hight light fill
     auto addHighlight = [&](const auto& posTuple, const sf::Color& color) {
-        int l = std::get<0>(posTuple);
+        int l = m_data.flip ? -std::get<0>(posTuple) : std::get<0>(posTuple);
         int t = std::get<1>(posTuple);
-        int localX = std::get<3>(posTuple);
-        int localY = m_data.boardGridY - 1 - std::get<2>(posTuple);
+        int localX = m_data.flip ? m_data.boardGridX - 1 - std::get<3>(posTuple) : std::get<3>(posTuple);
+        int localY = m_data.flip ? std::get<2>(posTuple) : m_data.boardGridY - 1 - std::get<2>(posTuple);
 
         if (localX < 0 || localX >= m_data.boardGridX || localY < 0 || localY >= m_data.boardGridY) return;
 
@@ -634,7 +642,7 @@ void FiveDChessRenderer::drawBoardsAndPieces(sf::RenderWindow& window, int start
 
 void FiveDChessRenderer::drawArrowList(sf::RenderWindow& window, int startX, int endX, int startY, int endY,
                                     const sf::Transform& transform, float cameraZoom) {
-    auto processArrows = [&](const auto& arrowList, bool isCheck) {
+    auto processArrows = [&](const auto& arrowList, bool isCheck, bool isGlobaled = false) {
         for (const auto& arrow : arrowList) {
             const auto& startTuple = arrow.first;
             const auto& endTuple = arrow.second;
@@ -642,21 +650,26 @@ void FiveDChessRenderer::drawArrowList(sf::RenderWindow& window, int startX, int
             const int presentColor = isCheck ? (int)!m_data.presentColor : (int)m_data.presentColor;
             const sf::Color& color = isCheck ? m_data.COLOR_CHECK_ARROW_CELL : m_data.COLOR_TRACE_ARROW_CELL;
 
-            int sYIdx = std::get<0>(startTuple);
+            int sYIdx = m_data.flip ? -std::get<0>(startTuple) : std::get<0>(startTuple);
             int sXIdx = ((std::get<1>(startTuple) << 1) | presentColor);
-            int eYIdx = std::get<0>(endTuple);
+            int eYIdx = m_data.flip ? -std::get<0>(endTuple) : std::get<0>(endTuple);
             int eXIdx = ((std::get<1>(endTuple) << 1) | presentColor);
+			
+			if (isGlobaled) {
+				sXIdx = std::get<1>(startTuple);
+				eXIdx = std::get<1>(endTuple);
+			}
 
             sf::Vector2f sCellPos(sXIdx * m_data.cellSizeX, sYIdx * m_data.cellSizeY);
             sf::Vector2f startCenter(
-                sCellPos.x + (m_data.cellSizeX - m_data.smallCellSizeX * m_data.boardGridX) / 2 + std::get<3>(startTuple) * m_data.smallCellSizeX + m_data.smallCellSizeX / 2,
-                sCellPos.y + (m_data.cellSizeY - m_data.smallCellSizeY * m_data.boardGridY) / 2 + (m_data.boardGridY - 1 - std::get<2>(startTuple)) * m_data.smallCellSizeY + m_data.smallCellSizeY / 2
+                sCellPos.x + (m_data.cellSizeX - m_data.smallCellSizeX * m_data.boardGridX) / 2 + (m_data.flip ? m_data.boardGridX - 1 - std::get<3>(startTuple) : std::get<3>(startTuple)) * m_data.smallCellSizeX + m_data.smallCellSizeX / 2,
+                sCellPos.y + (m_data.cellSizeY - m_data.smallCellSizeY * m_data.boardGridY) / 2 + (m_data.flip ? std::get<2>(startTuple) : m_data.boardGridY - 1 - std::get<2>(startTuple)) * m_data.smallCellSizeY + m_data.smallCellSizeY / 2
             );
 
             sf::Vector2f eCellPos(eXIdx * m_data.cellSizeX, eYIdx * m_data.cellSizeY);
             sf::Vector2f endCenter(
-                eCellPos.x + (m_data.cellSizeX - m_data.smallCellSizeX * m_data.boardGridX) / 2 + std::get<3>(endTuple) * m_data.smallCellSizeX + m_data.smallCellSizeX / 2,
-                eCellPos.y + (m_data.cellSizeY - m_data.smallCellSizeY * m_data.boardGridY) / 2 + (m_data.boardGridY - 1 - std::get<2>(endTuple)) * m_data.smallCellSizeY + m_data.smallCellSizeY / 2
+                eCellPos.x + (m_data.cellSizeX - m_data.smallCellSizeX * m_data.boardGridX) / 2 + (m_data.flip ? m_data.boardGridX - 1 - std::get<3>(endTuple) : std::get<3>(endTuple)) * m_data.smallCellSizeX + m_data.smallCellSizeX / 2,
+                eCellPos.y + (m_data.cellSizeY - m_data.smallCellSizeY * m_data.boardGridY) / 2 + (m_data.flip ? std::get<2>(endTuple) : m_data.boardGridY - 1 - std::get<2>(endTuple)) * m_data.smallCellSizeY + m_data.smallCellSizeY / 2
             );
 
             drawArrowOne(window, startCenter, endCenter, transform, cameraZoom, color);
@@ -666,6 +679,7 @@ void FiveDChessRenderer::drawArrowList(sf::RenderWindow& window, int startX, int
     processArrows(m_data.checkArrowsList, true);
     processArrows(m_data.phantomCheckArrowsList, true);
     processArrows(m_data.traceArrowsList, false);
+	processArrows(m_data.edgesArrowsList, false, true);
 }
 
 // ===================== FiveDChessUI - Implementation =====================

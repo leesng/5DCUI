@@ -99,6 +99,7 @@ struct EngineInterface final {
 	static const std::function<std::vector<std::tuple<action_t, std::string>> (std::any &) > get_historical_actions;
 	static const std::function<std::vector<std::tuple<action_t, std::string>> (std::any &) > get_following_actions;
 	static const std::function<int (std::any&) > get_current_level;
+	static const std::function<std::vector<std::pair<std::tuple<int, int, int, int>, std::tuple<int, int, int, int>>> (std::any&) > get_current_boards_edges;
 
     EngineInterface() = delete;
 };
